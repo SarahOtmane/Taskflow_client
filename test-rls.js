@@ -4,7 +4,7 @@ import { signIn, signOut } from "./auth.js";
 const { data: noAuth } = await supabase.from("tasks").select("*");
 console.log("Sans auth:", noAuth?.length, "(attendu: 0)");
 
-await signIn("jojo@gmail.com", "test2025");
+await signIn("jojo@gmail.com", process.env.ALICE_PASSWORD);
 const { data: tasks, error: errorAuth } = await supabase
   .from("tasks")
   .select("*");
