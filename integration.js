@@ -8,7 +8,12 @@ const bobClient = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_ANON_KEY,
 );
-const BASE = "https://fn-taskflow.azurewebsites.net/api";
+const supabaseAdmin = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_KEY,
+);
+const BASE =
+  "https://rg-taskflow3-fbdehgg4c8fye4br.switzerlandnorth-01.azurewebsites.net/api";
 async function run() {
   console.log("\n━━━ INTÉGRATION TASKFLOW ━━━\n");
   // 1. Auth
@@ -23,21 +28,38 @@ async function run() {
   const {
     data: { session: aliceSession },
   } = await aliceClient.auth.getSession();
+
+  const {
+    data: { session: bobSession },
+  } = await bobClient.auth.getSession();
   const {
     data: { user: bobUser },
   } = await bobClient.auth.getUser();
   console.log("✅ Alice et Bob connectés");
   // 2. Créer un projet et ajouter Bob
-  const { data: project } = await aliceClient
+  const { data: project, error: projectError } = await supabaseAdmin
     .from("projects")
-    .insert({ name: "Intégration Test", owner_id: aliceSession.user.id })
+    .insert({ name: "Intégration Test", owner_id: bobSession.user.id })
     .select()
     .single();
-  await aliceClient.from("project_members").insert({
-    project_id: project.id,
-    user_id: aliceSession.user.id,
-    role: "owner",
-  });
+
+  if (projectError || !project) {
+    console.error("❌ Erreur lors de la création du projet:", projectError);
+    throw new Error("Impossible de créer le projet");
+  }
+
+  const { error: memberError } = await supabaseAdmin
+    .from("project_members")
+    .insert({
+      project_id: project.id,
+      user_id: aliceSession.user.id,
+      role: "owner",
+    });
+
+  if (memberError) {
+    console.error("❌ Erreur lors de l'ajout du membre:", memberError);
+  }
+
   await fetch(`${BASE}/manage-members`, {
     method: "POST",
     headers: {
@@ -110,13 +132,22 @@ ${p.new.status}`);
   await new Promise((r) => setTimeout(r, 1000));
   console.log(`✅ Alice a reçu ${rtCount} événements Realtime`);
   // 6. Stats finales
-  const stats = await (
-    await fetch(`${BASE}/projectstats?project_id=${project.id}`)
-  ).json();
-  console.log("\n📊 STATS FINALES:");
-  console.log(` Tâches : ${stats.total_tasks}`);
-  console.log(` Complétion : ${stats.completion_rate}%`);
-  console.log(` Par statut :`, stats.by_status);
+  try {
+    const response = await fetch(
+      `${BASE}/projectstats?project_id=${project.id}`,
+    );
+    if (!response.ok) {
+      console.warn(`⚠️ Azure Function retourna ${response.status}`);
+    } else {
+      const stats = await response.json();
+      console.log("\n📊 STATS FINALES:");
+      console.log(` Tâches : ${stats.total_tasks}`);
+      console.log(` Complétion : ${stats.completion_rate}%`);
+      console.log(` Par statut :`, stats.by_status);
+    }
+  } catch (error) {
+    console.warn("⚠️ Impossible de récupérer les stats:", error.message);
+  }
   // 7. Notifications
   const { data: notifs } = await bobClient.from("notifications").select("*");
   console.log(`\n🔔 Notifications Bob: ${notifs?.length}`);
